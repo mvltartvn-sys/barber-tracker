@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barber Commission Tracker</title>
+<meta name="description" content="Free barber shop commission, tips and daily cash tracker. Works in your browser, data stays on your device. Export to Excel.">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#f6f5f2; --card:#ffffff; --ink:#1d1d1f; --muted:#6b6b70; --line:#e4e2dd;
+  --accent:#0f766e; --accent-ink:#ffffff; --danger:#b42318; --soft:#eef7f6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#141414; --card:#1e1e1e; --ink:#f2f2f2; --muted:#a0a0a6; --line:#333;
+    --accent:#2dd4bf; --accent-ink:#0b1514; --danger:#f97066; --soft:#16302d;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:18px 16px 8px;max-width:900px;margin:0 auto}
+header h1{margin:0;font-size:22px}
+header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+nav{display:flex;gap:6px;overflow-x:auto;padding:8px 16px;max-width:900px;margin:0 auto;position:sticky;top:0;background:var(--bg);z-index:2}
+nav button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:999px;font:inherit;cursor:pointer}
+nav button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+main{max-width:900px;margin:0 auto;padding:8px 16px 40px}
+section{display:none}
+section.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.card h2{margin:0 0 12px;font-size:17px}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+input,select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
+.btn{font:inherit;border:0;border-radius:8px;padding:10px 16px;background:var(--accent);color:var(--accent-ink);cursor:pointer;font-weight:600}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.btn.small{padding:5px 10px;font-weight:500;font-size:13px}
+.btn.del{background:transparent;color:var(--danger);border:0;padding:4px 8px;cursor:pointer;font:inherit}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.stats{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.stat{background:var(--soft);border-radius:10px;padding:12px}
+.stat span{display:block;font-size:12px;color:var(--muted)}
+.stat b{font-size:20px}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:500;font-size:12px}
+td.num,th.num{text-align:right}
+.muted{color:var(--muted);font-size:13px}
+.empty{color:var(--muted);text-align:center;padding:16px}
+footer{max-width:900px;margin:0 auto;padding:0 16px 30px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="shopTitle">Barber Commission Tracker</h1>
+  <p>Free. Works in your browser. Your data stays on this device. Export to Excel anytime.</p>
+</header>
+<nav>
+  <button data-tab="today" class="on">Today</button>
+  <button data-tab="records">Records</button>
+  <button data-tab="expenses">Expenses</button>
+  <button data-tab="report">Monthly report</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+<main>
+
+<section id="today" class="on">
+  <div class="card">
+    <h2>Add a sale</h2>
+    <div class="grid">
+      <label>Date<input type="date" id="sDate"></label>
+      <label>Barber<select id="sBarber"></select></label>
+      <label>Type<select id="sType"><option>Service</option><option>Product</option></select></label>
+      <label>Description<input id="sDesc" placeholder="e.g. Fade + beard"></label>
+      <label>Price<input type="number" id="sPrice" min="0" step="0.01" inputmode="decimal"></label>
+      <label>Tip<input type="number" id="sTip" min="0" step="0.01" inputmode="decimal" placeholder="0"></label>
+      <label>Payment<select id="sPay"><option>Cash</option><option>Card</option></select></label>
+    </div>
+    <div class="row"><button class="btn" id="addSale">Add sale</button><span class="muted" id="saleMsg"></span></div>
+  </div>
+  <div class="card">
+    <h2>Cash check for <span id="todayLabel"></span></h2>
+    <div class="stats" id="todayStats"></div>
+    <p class="muted">Expected cash in drawer = cash sales + cash tips − cash expenses (plus your opening float).</p>
+  </div>
+</section>
+
+<section id="records">
+  <div class="card">
+    <h2>Sales</h2>
+    <div class="row" style="margin-top:0"><label style="flex-direction:row;align-items:center;gap:8px">Month <input type="month" id="rMonth" style="width:auto"></label></div>
+    <div class="tablewrap"><table id="salesTable"></table></div>
+  </div>
+</section>
+
+<section id="expenses">
+  <div class="card">
+    <h2>Add an expense</h2>
+    <div class="grid">
+      <label>Date<input type="date" id="eDate"></label>
+      <label>Category<select id="eCat"></select></label>
+      <label>Description<input id="eDesc" placeholder="e.g. Clippers oil"></label>
+      <label>Amount<input type="number" id="eAmt" min="0" step="0.01" inputmode="decimal"></label>
+      <label>Paid with<select id="ePay"><option>Cash</option><option>Card</option></select></label>
+    </div>
+    <div class="row"><button class="btn" id="addExp">Add expense</button></div>
+  </div>
+  <div class="card">
+    <h2>Expenses</h2>
+    <div class="row" style="margin-top:0"><label style="flex-direction:row;align-items:center;gap:8px">Month <input type="month" id="eMonth" style="width:auto"></label></div>
+    <div class="tablewrap"><table id="expTable"></table></div>
+  </div>
+</section>
+
+<section id="report">
+  <div class="card">
+    <h2>Monthly report</h2>
+    <div class="row" style="margin-top:0">
+      <label style="flex-direction:row;align-items:center;gap:8px">Month <input type="month" id="pMonth" style="width:auto"></label>
+      <button class="btn" id="exportXlsx">Download Excel</button>
+    </div>
+  </div>
+  <div class="card"><h2>Shop totals</h2><div class="stats" id="shopStats"></div></div>
+  <div class="card"><h2>Barber payouts</h2><div class="tablewrap"><table id="payTable"></table></div>
+    <p class="muted">Payout = service sales × barber commission % + product sales × product commission % + tips (if tips go to barber).</p></div>
+</section>
+
+<section id="settings">
+  <div class="card">
+    <h2>Shop</h2>
+    <div class="grid">
+      <label>Shop name<input id="cfgName" placeholder="My Barber Shop"></label>
+      <label>Currency symbol<input id="cfgCur" placeholder="$"></label>
+      <label>Product commission %<input type="number" id="cfgProd" min="0" max="100" step="0.1"></label>
+      <label>Tips go to<select id="cfgTips"><option value="barber">Barber (100%)</option><option value="shop">Shop</option></select></label>
+    </div>
+    <div class="row"><button class="btn" id="saveCfg">Save</button><span class="muted" id="cfgMsg"></span></div>
+  </div>
+  <div class="card">
+    <h2>Barbers</h2>
+    <div class="grid">
+      <label>Name<input id="bName"></label>
+      <label>Service commission %<input type="number" id="bRate" min="0" max="100" step="0.1" placeholder="50"></label>
+    </div>
+    <div class="row"><button class="btn" id="addBarber">Add barber</button></div>
+    <div class="tablewrap"><table id="barberTable"></table></div>
+  </div>
+  <div class="card">
+    <h2>Expense categories</h2>
+    <div class="grid"><label>New category<input id="catName"></label></div>
+    <div class="row"><button class="btn" id="addCat">Add category</button></div>
+    <p class="muted" id="catList"></p>
+  </div>
+  <div class="card">
+    <h2>Backup</h2>
+    <p class="muted">Your data is saved only in this browser. Download a backup now and then, or to move to another device.</p>
+    <div class="row">
+      <button class="btn ghost" id="backup">Download backup</button>
+      <label class="btn ghost" style="flex-direction:row;color:var(--accent)">Restore backup<input type="file" id="restore" accept=".json" hidden></label>
+      <button class="btn ghost" id="loadDemo">Load demo data</button>
+      <button class="btn del" id="wipe">Delete all data</button>
+    </div>
+  </div>
+</section>
+</main>
+<footer>Made for barbers and salon owners. No sign-up, no server: everything you enter stays in this browser.</footer>
+
+<script>
+const KEY = 'barberTracker.v1';
+const defaults = () => ({
+  cfg: {name: '', cur: '$', prodRate: 10, tips: 'barber'},
+  barbers: [],
+  cats: ['Rent', 'Supplies', 'Products stock', 'Utilities', 'Marketing', 'Other'],
+  sales: [],
+  expenses: []
+});
+let db = load();
+
+function load(){
+  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.cfg) return Object.assign(defaults(), d); } catch(e){}
+  return defaults();
+}
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(db)); } catch(e){} }
+
+const $ = id => document.getElementById(id);
+const today = () => new Date().toISOString().slice(0,10);
+const month = () => today().slice(0,7);
+const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const money = v => db.cfg.cur + (Math.round(v*100)/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const barberName = id => (db.barbers.find(b => b.id === id) || {name:'(removed)'}).name;
+
+// Tabs
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('section').forEach(s => s.classList.toggle('on', s.id === b.dataset.tab));
+  render();
+});
+
+// Sales
+$('addSale').onclick = () => {
+  const price = num($('sPrice').value);
+  if (!db.barbers.length) { $('saleMsg').textContent = 'Add a barber in Settings first.'; return; }
+  if (price <= 0) { $('saleMsg').textContent = 'Enter a price.'; return; }
+  db.sales.push({id: uid(), date: $('sDate').value || today(), barber: $('sBarber').value, type: $('sType').value,
+    desc: $('sDesc').value.trim(), price, tip: num($('sTip').value), pay: $('sPay').value});
+  save();
+  $('sDesc').value = ''; $('sPrice').value = ''; $('sTip').value = '';
+  $('saleMsg').textContent = 'Saved.';
+  setTimeout(() => $('saleMsg').textContent = '', 1500);
+  render();
+};
+
+// Expenses
+$('addExp').onclick = () => {
+  const amt = num($('eAmt').value);
+  if (amt <= 0) return;
+  db.expenses.push({id: uid(), date: $('eDate').value || today(), cat: $('eCat').value, desc: $('eDesc').value.trim(), amt, pay: $('ePay').value});
+  save();
+  $('eDesc').value = ''; $('eAmt').value = '';
+  render();
+};
+
+// Settings
+$('saveCfg').onclick = () => {
+  db.cfg.name = $('cfgName').value.trim();
+  db.cfg.cur = $('cfgCur').value.trim() || '$';
+  db.cfg.prodRate = num($('cfgProd').value);
+  db.cfg.tips = $('cfgTips').value;
+  save();
+  $('cfgMsg').textContent = 'Saved.';
+  setTimeout(() => $('cfgMsg').textContent = '', 1500);
+  render();
+};
+$('addBarber').onclick = () => {
+  const name = $('bName').value.trim();
+  if (!name) return;
+  db.barbers.push({id: uid(), name, rate: num($('bRate').value) || 50});
+  $('bName').value = ''; $('bRate').value = '';
+  save(); render();
+};
+$('addCat').onclick = () => {
+  const c = $('catName').value.trim();
+  if (c && !db.cats.includes(c)) { db.cats.push(c); save(); }
+  $('catName').value = '';
+  render();
+};
+
+function del(list, id){ db[list] = db[list].filter(x => x.id !== id); save(); render(); }
+window.del = del;
+
+// Calculations
+function monthReport(m){
+  const sales = db.sales.filter(s => s.date.startsWith(m));
+  const exps = db.expenses.filter(e => e.date.startsWith(m));
+  const tipsToBarber = db.cfg.tips === 'barber';
+  const rows = db.barbers.map(b => {
+    const mine = sales.filter(s => s.barber === b.id);
+    const svc = mine.filter(s => s.type === 'Service').reduce((a,s) => a + s.price, 0);
+    const prod = mine.filter(s => s.type === 'Product').reduce((a,s) => a + s.price, 0);
+    const tips = mine.reduce((a,s) => a + s.tip, 0);
+    const comm = svc * b.rate/100 + prod * db.cfg.prodRate/100;
+    return {name: b.name, rate: b.rate, count: mine.length, svc, prod, tips, comm, payout: comm + (tipsToBarber ? tips : 0)};
+  });
+  const revenue = sales.reduce((a,s) => a + s.price, 0);
+  const tips = sales.reduce((a,s) => a + s.tip, 0);
+  const payouts = rows.reduce((a,r) => a + r.payout, 0);
+  const expenses = exps.reduce((a,e) => a + e.amt, 0);
+  const cash = sales.filter(s => s.pay === 'Cash').reduce((a,s) => a + s.price + s.tip, 0);
+  const card = sales.filter(s => s.pay === 'Card').reduce((a,s) => a + s.price + s.tip, 0);
+  const net = revenue + (tipsToBarber ? 0 : tips) - (payouts - (tipsToBarber ? tips : 0)) - expenses;
+  return {sales, exps, rows, revenue, tips, payouts, expenses, cash, card, net};
+}
+
+function stats(el, items){
+  el.innerHTML = items.map(([k,v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
+}
+
+function render(){
+  $('shopTitle').textContent = db.cfg.name || 'Barber Commission Tracker';
+  const opts = db.barbers.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  const keep = $('sBarber').value;
+  $('sBarber').innerHTML = opts || '<option value="">Add a barber in Settings</option>';
+  if (keep) $('sBarber').value = keep;
+  const keepCat = $('eCat').value;
+  $('eCat').innerHTML = db.cats.map(c => `<option>${esc(c)}</option>`).join('');
+  if (keepCat) $('eCat').value = keepCat;
+
+  // Today
+  const d = $('sDate').value || today();
+  $('todayLabel').textContent = d;
+  const ts = db.sales.filter(s => s.date === d), te = db.expenses.filter(e => e.date === d);
+  const cashSales = ts.filter(s => s.pay === 'Cash').reduce((a,s) => a + s.price, 0);
+  const cashTips = ts.filter(s => s.pay === 'Cash').reduce((a,s) => a + s.tip, 0);
+  const cardTotal = ts.filter(s => s.pay === 'Card').reduce((a,s) => a + s.price + s.tip, 0);
+  const cashExp = te.filter(e => e.pay === 'Cash').reduce((a,e) => a + e.amt, 0);
+  stats($('todayStats'), [['Clients', ts.length], ['Sales', money(ts.reduce((a,s) => a + s.price, 0))],
+    ['Card total', money(cardTotal)], ['Expected cash', money(cashSales + cashTips - cashExp)]]);
+
+  // Records
+  const rm = $('rMonth').value || month();
+  const rs = db.sales.filter(s => s.date.startsWith(rm)).sort((a,b) => b.date.localeCompare(a.date));
+  $('salesTable').innerHTML = rs.length ? '<tr><th>Date</th><th>Barber</th><th>Type</th><th>Description</th><th class="num">Price</th><th class="num">Tip</th><th>Paid</th><th></th></tr>' +
+    rs.map(s => `<tr><td>${s.date}</td><td>${esc(barberName(s.barber))}</td><td>${s.type}</td><td>${esc(s.desc)}</td><td class="num">${money(s.price)}</td><td class="num">${money(s.tip)}</td><td>${s.pay}</td><td><button class="btn del" onclick="del('sales','${s.id}')">✕</button></td></tr>`).join('')
+    : '<tr><td class="empty">No sales this month yet.</td></tr>';
+
+  // Expenses
+  const em = $('eMonth').value || month();
+  const es = db.expenses.filter(e => e.date.startsWith(em)).sort((a,b) => b.date.localeCompare(a.date));
+  $('expTable').innerHTML = es.length ? '<tr><th>Date</th><th>Category</th><th>Description</th><th class="num">Amount</th><th>Paid</th><th></th></tr>' +
+    es.map(e => `<tr><td>${e.date}</td><td>${esc(e.cat)}</td><td>${esc(e.desc)}</td><td class="num">${money(e.amt)}</td><td>${e.pay}</td><td><button class="btn del" onclick="del('expenses','${e.id}')">✕</button></td></tr>`).join('')
+    : '<tr><td class="empty">No expenses this month yet.</td></tr>';
+
+  // Report
+  const r = monthReport($('pMonth').value || month());
+  stats($('shopStats'), [['Sales', money(r.revenue)], ['Tips', money(r.tips)], ['Barber payouts', money(r.payouts)],
+    ['Expenses', money(r.expenses)], ['Cash taken', money(r.cash)], ['Card taken', money(r.card)], ['Shop net profit', money(r.net)]]);
+  $('payTable').innerHTML = r.rows.length ? '<tr><th>Barber</th><th class="num">Clients</th><th class="num">Services</th><th class="num">Products</th><th class="num">Commission</th><th class="num">Tips</th><th class="num">Payout</th></tr>' +
+    r.rows.map(x => `<tr><td>${esc(x.name)} (${x.rate}%)</td><td class="num">${x.count}</td><td class="num">${money(x.svc)}</td><td class="num">${money(x.prod)}</td><td class="num">${money(x.comm)}</td><td class="num">${money(x.tips)}</td><td class="num"><b>${money(x.payout)}</b></td></tr>`).join('')
+    : '<tr><td class="empty">Add barbers in Settings.</td></tr>';
+
+  // Settings
+  $('cfgName').value = db.cfg.name; $('cfgCur').value = db.cfg.cur;
+  $('cfgProd').value = db.cfg.prodRate; $('cfgTips').value = db.cfg.tips;
+  $('barberTable').innerHTML = db.barbers.map(b => `<tr><td>${esc(b.name)}</td><td class="num">${b.rate}%</td><td><button class="btn del" onclick="del('barbers','${b.id}')">✕</button></td></tr>`).join('');
+  $('catList').textContent = db.cats.join(' · ');
+}
+
+['rMonth','eMonth','pMonth','sDate'].forEach(id => $(id).onchange = render);
+
+// Excel export
+$('exportXlsx').onclick = () => {
+  const m = $('pMonth').value || month();
+  const r = monthReport(m);
+  const summary = [['Shop', db.cfg.name || 'Barber shop'], ['Month', m], [],
+    ['Sales', r.revenue], ['Tips', r.tips], ['Barber payouts', r.payouts], ['Expenses', r.expenses],
+    ['Cash taken', r.cash], ['Card taken', r.card], ['Shop net profit', r.net]];
+  const pay = [['Barber','Commission %','Clients','Service sales','Product sales','Commission','Tips','Payout'],
+    ...r.rows.map(x => [x.name, x.rate, x.count, x.svc, x.prod, x.comm, x.tips, x.payout])];
+  const sales = [['Date','Barber','Type','Description','Price','Tip','Payment'],
+    ...r.sales.map(s => [s.date, barberName(s.barber), s.type, s.desc, s.price, s.tip, s.pay])];
+  const exps = [['Date','Category','Description','Amount','Paid with'], ...r.exps.map(e => [e.date, e.cat, e.desc, e.amt, e.pay])];
+  if (window.XLSX) {
+    const wb = XLSX.utils.book_new();
+    [['Summary',summary],['Payouts',pay],['Sales',sales],['Expenses',exps]].forEach(([n,a]) =>
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), n));
+    XLSX.writeFile(wb, `barber-report-${m}.xlsx`);
+  } else {
+    const csv = [...summary, [], ...pay, [], ...sales, [], ...exps]
+      .map(row => row.map(c => `"${String(c ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
+    download(new Blob([csv], {type:'text/csv'}), `barber-report-${m}.csv`);
+  }
+};
+
+function download(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// Backup
+$('backup').onclick = () => download(new Blob([JSON.stringify(db, null, 2)], {type:'application/json'}), `barber-backup-${today()}.json`);
+$('restore').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => { try { const d = JSON.parse(t); if (d.cfg) { db = Object.assign(defaults(), d); save(); render(); } } catch(err){ alert('Not a valid backup file.'); } });
+};
+$('wipe').onclick = () => { if (confirm('Delete all data on this device? This cannot be undone.')) { db = defaults(); save(); render(); } };
+$('loadDemo').onclick = () => {
+  db = defaults();
+  db.cfg.name = 'Demo Barber Co.';
+  const names = [['Alex',50],['Sam',45],['Jordan',55]];
+  db.barbers = names.map(([n,r]) => ({id: uid(), name: n, rate: r}));
+  const services = [['Haircut',25],['Fade',30],['Beard trim',15],['Cut + beard',40],['Kids cut',18]];
+  const base = new Date(); base.setDate(1);
+  for (let day = 0; day < Math.min(new Date().getDate(), 28); day++) {
+    const dt = new Date(base); dt.setDate(1 + day);
+    const ds = dt.toISOString().slice(0,10);
+    for (let i = 0; i < 6; i++) {
+      const [desc, price] = services[(day + i) % services.length];
+      db.sales.push({id: uid(), date: ds, barber: db.barbers[i % 3].id, type: 'Service', desc, price, tip: i % 2 ? 5 : 0, pay: i % 3 ? 'Card' : 'Cash'});
+    }
+    if (day % 4 === 0) db.sales.push({id: uid(), date: ds, barber: db.barbers[day % 3].id, type: 'Product', desc: 'Pomade', price: 20, tip: 0, pay: 'Card'});
+    if (day % 7 === 0) db.expenses.push({id: uid(), date: ds, cat: 'Supplies', desc: 'Blades & towels', amt: 35, pay: 'Cash'});
+  }
+  db.expenses.push({id: uid(), date: base.toISOString().slice(0,10), cat: 'Rent', desc: 'Monthly rent', amt: 1200, pay: 'Card'});
+  save(); render();
+};
+
+$('sDate').value = today(); $('eDate').value = today();
+$('rMonth').value = $('eMonth').value = $('pMonth').value = month();
+render();
+</script>
+</body>
+</html>
